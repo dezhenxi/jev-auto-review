@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime, { type StreamChunk } from '@deepseek-ai/dsh-llm'
@@ -34,11 +37,33 @@ import {
 
 const contexts: Context[] = []
 const stubs: TypeSafeStub[] = []
+const roots: string[] = []
 
 afterEach(async () => {
   while (contexts.length > 0) await contexts.pop()!.fiber.dispose()
   await closeStubs(stubs)
+  while (roots.length > 0) await rm(roots.pop()!, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
+
+/** One captured telemetry record, loosely typed so the spec can assert its attributes. */
+interface CapturedRecord {
+  readonly channel: string
+  readonly severity: string
+  readonly attributes: Record<string, string | number>
+  readonly body?: unknown
+}
+
+/** Read the verdict document once it exists, polling past the write scheduled off the hot path. */
+async function readStats(file: string): Promise<Record<string, unknown> | undefined> {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    try {
+      return JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    } catch {
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+  }
+  return undefined
+}
 
 /** Start one TypeSafe stub and register it for teardown. */
 async function stub(respond: Parameters<typeof startTypeSafeStub>[0]): Promise<TypeSafeStub> {
@@ -65,6 +90,12 @@ interface HarnessOptions {
   readonly beforeCascade?: (ctx: Context) => void
   /** Extra fast-path observation: a pre-execute listener registered after the reviewer's. */
   readonly onPreExecute?: () => void
+  /** Verdict document path; a path under a plain file makes the write fail. */
+  readonly statsPath?: string
+  /** Telemetry backend disposition: healthy by default. */
+  readonly telemetry?: 'ok' | 'throwing' | 'absent'
+  /** Turn the verdict document off. */
+  readonly stats?: boolean
 }
 
 /** Mount the shipped Auto review integration plus this cascade over it. */
@@ -73,6 +104,8 @@ async function harness(options: HarnessOptions = {}): Promise<{
   adapter: RecordingAdapter
   approval: ApprovalStub
   jev: { dispose(): Promise<void> }
+  telemetry: CapturedRecord[]
+  statsFile: string
 }> {
   const ctx = new Context()
   contexts.push(ctx)
@@ -81,6 +114,20 @@ async function harness(options: HarnessOptions = {}): Promise<{
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(SystemPrompt, {})
   await ctx.plugin(ToolRuntime)
+  const root = await mkdtemp(join(tmpdir(), 'jev-cascade-'))
+  roots.push(root)
+  const statsFile = join(root, 'stats.json')
+  const telemetry: CapturedRecord[] = []
+  if (options.telemetry !== 'absent') {
+    ctx.provide('sessionTelemetry', {
+      sharing: 'full',
+      emit: (record: CapturedRecord) => {
+        if (options.telemetry === 'throwing') throw new Error('telemetry backend is down')
+        telemetry.push(record)
+      },
+      async shutdown() {},
+    } as never)
+  }
   ctx.provide('shell', {
     sandboxMode: 'workspace-write',
     resolve() { throw new Error('these tests do not execute shell requests') },
@@ -101,8 +148,9 @@ async function harness(options: HarnessOptions = {}): Promise<{
     minProbability: options.minProbability ?? 0.98,
     timeoutMs: options.timeoutMs ?? 500,
     ...options.cache === undefined ? {} : { cache: options.cache },
-    // The verdict document defaults into the real DSH home; this suite stays out of it.
-    stats: false,
+    ...options.stats === undefined ? {} : { stats: options.stats },
+    // The verdict document defaults into the real DSH home; this suite keeps its own.
+    statsPath: options.statsPath ?? statsFile,
   })
   if (options.onPreExecute !== undefined) {
     const observe = options.onPreExecute
@@ -111,10 +159,87 @@ async function harness(options: HarnessOptions = {}): Promise<{
       return next()
     })
   }
-  return { ctx, adapter, approval, jev }
+  return { ctx, adapter, approval, jev, telemetry, statsFile }
 }
 
 describe('jev-auto-review cascade over the shipped reviewer', () => {
+  it('counts an answered verdict into the document and the telemetry backend', async () => {
+    const endpoint = await stub((res) => { answerNoul(res, 0.999) })
+    const { ctx, telemetry, statsFile } = await harness({ baseURL: endpoint.url })
+    const probe = registerProbe(ctx)
+    const { agent, callId } = pendingSession(ctx, 'counted-answer')
+
+    await executePending(ctx, agent, callId)
+
+    expect(probe.runs()).toBe(1)
+    expect(await readStats(statsFile)).toMatchObject({
+      version: 1,
+      totals: { answered: 1, escalated: 0, unavailable: 0 },
+      byTool: { probe: { answered: 1, escalated: 0, unavailable: 0 } },
+    })
+    expect(telemetry).toHaveLength(1)
+    expect(telemetry[0]).toMatchObject({
+      channel: 'ops',
+      severity: 'info',
+      attributes: {
+        'telemetry.op': 'jev-auto-review/verdict',
+        'tool': 'probe',
+        'verdict': 'answered',
+        'cached': 0,
+        'total.answered': 1,
+      },
+    })
+  })
+
+  it('keeps diagnostics out of the review path when every sink fails', async () => {
+    const endpoint = await stub((res) => { answerNoul(res, 0.999) })
+    const root = await mkdtemp(join(tmpdir(), 'jev-blocked-'))
+    roots.push(root)
+    // A plain file where the document directory must be: the write cannot land.
+    const blocker = join(root, 'blocker')
+    await writeFile(blocker, 'not a directory')
+    const { ctx, statsFile } = await harness({
+      baseURL: endpoint.url,
+      statsPath: join(blocker, 'stats.json'),
+      telemetry: 'throwing',
+    })
+    const probe = registerProbe(ctx)
+    const { agent, callId } = pendingSession(ctx, 'sinks-down')
+
+    const result = await executePending(ctx, agent, callId)
+
+    expect(result.isError).toBe(false)
+    expect(probe.runs()).toBe(1)
+    expect(await readStats(statsFile)).toBeUndefined()
+  })
+
+  it('emits a record without a verdict document when stats are off', async () => {
+    const endpoint = await stub((res) => { answerNoul(res, 0.999) })
+    const { ctx, telemetry, statsFile } = await harness({ baseURL: endpoint.url, stats: false })
+    const probe = registerProbe(ctx)
+    const { agent, callId } = pendingSession(ctx, 'no-document')
+
+    await executePending(ctx, agent, callId)
+
+    expect(probe.runs()).toBe(1)
+    expect(await readStats(statsFile)).toBeUndefined()
+    expect(telemetry).toHaveLength(1)
+    expect(telemetry[0]?.attributes).not.toHaveProperty('total.answered')
+    expect(telemetry[0]?.body).toBeUndefined()
+  })
+
+  it('counts a verdict without a telemetry backend', async () => {
+    const endpoint = await stub((res) => { answerNoul(res, 0.999) })
+    const { ctx, statsFile } = await harness({ baseURL: endpoint.url, telemetry: 'absent' })
+    const probe = registerProbe(ctx)
+    const { agent, callId } = pendingSession(ctx, 'no-backend')
+
+    await executePending(ctx, agent, callId)
+
+    expect(probe.runs()).toBe(1)
+    expect(await readStats(statsFile)).toMatchObject({ totals: { answered: 1 } })
+  })
+
   it('answers an approved routine call without a language-model reviewer request', async () => {
     const endpoint = await stub((res) => { answerNoul(res, 0.999) })
     const { ctx, adapter } = await harness({ baseURL: endpoint.url })

@@ -1,0 +1,4 @@
+# tsx ships esbuild; its install script only links the platform binary, and the
+# calibration tool needs tsx to run sources that use parameter properties.
+allowBuilds:
+  esbuild: true
