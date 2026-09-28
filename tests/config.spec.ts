@@ -1,4 +1,6 @@
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import {
   API_KEY_ENV,
   Config,
@@ -29,9 +31,16 @@ describe('resolveConfig defaults', () => {
       cache: DEFAULT_CACHE,
       cacheMaxEntries: DEFAULT_CACHE_MAX_ENTRIES,
       stateSections: ['environment', 'pending-action'],
+      stats: true,
+      statsPath: join(resolveDshHome(), 'jev-auto-review', 'stats.json'),
     })
     expect(Object.isFrozen(resolved)).toBe(true)
     expect(Object.isFrozen(resolved.allowTools)).toBe(true)
+  })
+
+  it('honours an explicit statistics switch and path', () => {
+    expect(resolveConfig(base({ stats: false })).stats).toBe(false)
+    expect(resolveConfig(base({ statsPath: '/tmp/custom.json' })).statsPath).toBe('/tmp/custom.json')
   })
 
   it('normalizes the allowlist and the section list', () => {

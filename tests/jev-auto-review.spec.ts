@@ -101,6 +101,8 @@ async function harness(options: HarnessOptions = {}): Promise<{
     minProbability: options.minProbability ?? 0.98,
     timeoutMs: options.timeoutMs ?? 500,
     ...options.cache === undefined ? {} : { cache: options.cache },
+    // The verdict document defaults into the real DSH home; this suite stays out of it.
+    stats: false,
   })
   if (options.onPreExecute !== undefined) {
     const observe = options.onPreExecute

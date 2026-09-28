@@ -36,6 +36,10 @@ export interface ResolvedConfig {
   readonly cacheMaxEntries: number
   /** Sections of the reviewer request forwarded as the System One model's state. */
   readonly stateSections: readonly StateSectionName[]
+  /** Whether the local verdict document is written. */
+  readonly stats: boolean
+  /** Absolute path of the local verdict document. */
+  readonly statsPath: string
 }
 
 /** One recognized authorization-review request and its parsed sections. */

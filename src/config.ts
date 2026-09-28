@@ -4,7 +4,9 @@
  * @module @deepseek-ai/dsh-experimental-jev-auto-review/config
  */
 
+import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { deepFreeze } from '@deepseek-ai/dsh-util-values'
 import type { ResolvedConfig, StateSectionName } from './types.ts'
 
@@ -48,6 +50,15 @@ export const STATE_SECTION_NAMES: readonly StateSectionName[] = deepFreeze([
   'pending-action',
 ])
 
+/**
+ * Whether the local verdict document is written by default. It is a diagnostic
+ * artifact: a deployment that does not want a file per profile turns it off.
+ */
+export const DEFAULT_STATS = true
+
+/** File name of the verdict document inside its directory. */
+export const STATS_FILENAME = 'stats.json'
+
 /** Plugin configuration as written in a profile's `cordis.yml`. */
 export interface Config {
   /** TypeSafe API key; falls back to `$TYPESAFE_API_KEY`. Absent or empty leaves the plugin inert. */
@@ -76,6 +87,10 @@ export interface Config {
   cacheMaxEntries?: number
   /** Sections forwarded as state. Defaults to the environment and the pending action. */
   stateSections?: StateSectionName[]
+  /** Write the local verdict document. Defaults to true. */
+  stats?: boolean
+  /** Verdict document path. Defaults to `<dsh home>/jev-auto-review/stats.json`. */
+  statsPath?: string
 }
 
 /** Schemastery schema for {@link Config}. */
@@ -89,6 +104,8 @@ export const Config: z<Config> = z.object({
   cache: z.boolean(),
   cacheMaxEntries: z.natural(),
   stateSections: z.array(z.union(STATE_SECTION_NAMES)).default([...DEFAULT_STATE_SECTIONS]),
+  stats: z.boolean(),
+  statsPath: z.string(),
 })
 
 /**
@@ -113,6 +130,8 @@ export function resolveConfig(config: Config, apiKeyFromEnvironment?: string): R
     cache: config.cache ?? DEFAULT_CACHE,
     cacheMaxEntries: config.cacheMaxEntries ?? DEFAULT_CACHE_MAX_ENTRIES,
     stateSections: [...new Set(config.stateSections ?? DEFAULT_STATE_SECTIONS)],
+    stats: config.stats ?? DEFAULT_STATS,
+    statsPath: config.statsPath ?? join(resolveDshHome(), 'jev-auto-review', STATS_FILENAME),
   }
   assertAbsoluteHttpUrl(resolved.baseURL)
   assertNonEmpty(resolved.model, 'model')

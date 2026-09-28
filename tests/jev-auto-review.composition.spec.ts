@@ -14,7 +14,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as AutoReview from '@deepseek-ai/dsh-experimental-auto-review'
 import * as JevAutoReview from '../src/index.ts'
-import { executePending, approvalStub, pendingSession, RecordingAdapter, registerProbe } from './review-harness.ts'
+import { executePending, pendingSession, RecordingAdapter, registerProbe } from './review-harness.ts'
 import { answerNoul, closeStubs, startTypeSafeStub, type TypeSafeStub } from './type-safe-stub.ts'
 
 /** Every specifier the composition names, mapped to the module the Loader imports. */
@@ -57,7 +57,7 @@ async function compose(endpoint: string): Promise<Context> {
     '    presets:',
     '      read-only: { sandbox: read-only, approval: ask, name: Read only }',
     '      workspace-write: { sandbox: workspace-write, approval: ask, name: Workspace write }',
-    '      danger-full-access: { sandbox: danger-full-access, approval: ask, name: Full access }',
+    '      danger-full-access: { sandbox: danger-full-access, approval: never, name: Full access }',
     "- name: '@deepseek-ai/dsh-experimental-auto-review'",
     "- name: '@deepseek-ai/dsh-experimental-jev-auto-review'",
     '  config:',
@@ -66,6 +66,8 @@ async function compose(endpoint: string): Promise<Context> {
     '    allowTools:',
     '      - probe',
     '    minProbability: 0.98',
+    // The verdict document would otherwise default into the real DSH home.
+    `    statsPath: ${JSON.stringify(join(root, 'stats.json'))}`,
     '',
   ].join('\n'))
 
@@ -89,7 +91,7 @@ async function compose(endpoint: string): Promise<Context> {
     run() { throw new Error('this composition does not execute shell requests') },
     start() { throw new Error('this composition does not execute shell requests') },
   })
-  context.provide('approval', approvalStub())
+  context.provide('approval', { config: { policy: 'ask' } })
   await context.loader.create({
     name: 'cordis:include',
     config: { path: pathToFileURL(configPath).href },
