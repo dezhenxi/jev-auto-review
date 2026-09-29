@@ -24,6 +24,10 @@
     "README.zh.md"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dezhenxi/jev-auto-review.git"
+  },
   "keywords": [
     "deepseek-harness",
     "dsh",

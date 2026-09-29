@@ -36,30 +36,36 @@ Auto review 对语言模型放行的调用，以"每次工具调用前都问一�
 <a id="install"></a>
 ## 安装
 
-本插件依赖 Auto review 层，而它在默认安装中是关闭的。先构建本仓库，再把两层装进 profile：
+涉及两层：你的 harness 随附的 Auto review 插件，以及回答它常规调用的本级联。本仓库自带构建产物，因此直接用仓库地址安装即可：
 
 ```sh
-git clone https://github.com/<your-account>/jev-auto-review.git
+dsh plugin --profile web add https://github.com/dezhenxi/jev-auto-review
+```
+
+同一个地址也可以粘进 Web 界面的 **插件 → 添加插件**。git 安装不会运行构建脚本、也不需要任何审批，因为仓库里提交了 `lib/` 产物。
+
+再补上 Auto review 层，取你正在运行的 harness 版本：
+
+```sh
+dsh plugin --profile web add @deepseek-ai/dsh-experimental-auto-review@next
+```
+
+两个包都声明了 `dsh.bundle.patch`，因此 CLI 会把各自的补丁追加为一个 profile 层。之后在输入框或 `/permission` 选择器里选中 **Auto review**；两层本身都不会切换正在运行的会话。
+
+要改源码时改用检出安装。每次改源码都必须重新构建并提交 `lib/`，否则仓库会发布过期代码：
+
+```sh
+git clone https://github.com/dezhenxi/jev-auto-review.git
 cd jev-auto-review
 pnpm install
 pnpm run build
 
 # Auto review 层，来自你正在运行的 harness 检出
 dsh plugin --profile web add /path/to/deepseek-harness/packages/experimental/auto-review
-# 本级联
 dsh plugin --profile web add /path/to/jev-auto-review
 ```
 
-Windows 下改用绝对路径：
-
-```powershell
-dsh plugin --profile web add "E:\DeepSeek\deepseek-harness\packages\experimental\auto-review"
-dsh plugin --profile web add "E:\DeepSeek\jev-auto-review"
-```
-
-两个包都声明了 `dsh.bundle.patch`，因此 CLI 会把各自的补丁追加为一个 profile 层。之后在输入框或 `/permission` 选择器里选中 **Auto review**；两层本身都不会切换正在运行的会话。
-
-> 第一条 `add` 指向你 harness 检出里的 Auto review 包。等你运行的版本发布到可解析的 dist-tag 之后，也可以直接从 npm 安装：`dsh plugin --profile web add @deepseek-ai/dsh-experimental-auto-review@next`。
+Windows 下改用绝对路径，例如 `dsh plugin --profile web add "E:\DeepSeek\jev-auto-review"`。
 
 用同一条 CLI 卸载：
 

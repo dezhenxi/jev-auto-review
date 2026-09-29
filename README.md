@@ -34,30 +34,36 @@ The cascade is deliberately narrow:
 
 ## Install
 
-The plugin needs the Auto review layer, which is switched off in a default harness installation. Build this repository, then install both layers into a profile:
+Two layers are involved: the Auto review plugin your harness ships, and this cascade that answers its routine calls. The cascade ships built, so a repository URL installs it as-is:
 
 ```sh
-git clone https://github.com/<your-account>/jev-auto-review.git
-cd jev-auto-review
-pnpm install
-pnpm run build
-
-# the Auto review layer, from the harness checkout you already run
-dsh plugin --profile web add /path/to/deepseek-harness/packages/experimental/auto-review
-# this cascade
-dsh plugin --profile web add /path/to/jev-auto-review
+dsh plugin --profile web add https://github.com/dezhenxi/jev-auto-review
 ```
 
-On Windows, pass absolute paths instead, for example:
+The same URL pastes into **Plugins → Add plugin** in the Web UI. A git install runs no build script and needs no approval, because the repository commits its `lib/` output.
 
-```powershell
-dsh plugin --profile web add "E:\DeepSeek\deepseek-harness\packages\experimental\auto-review"
-dsh plugin --profile web add "E:\DeepSeek\jev-auto-review"
+Add the Auto review layer too, from the harness version you run:
+
+```sh
+dsh plugin --profile web add @deepseek-ai/dsh-experimental-auto-review@next
 ```
 
 Both packages declare `dsh.bundle.patch`, so the CLI appends each patch as a profile layer. Select **Auto review** in the composer or the `/permission` picker afterwards; neither layer switches a live session on its own.
 
-> The first `add` names the Auto review package from your harness checkout. Install it from npm (`dsh plugin --profile web add @deepseek-ai/dsh-experimental-auto-review@next`) once the version you run is published under a dist-tag you can resolve.
+Install from a checkout when you are changing the source. Rebuild and commit `lib/` with every source change, or the repository ships stale code:
+
+```sh
+git clone https://github.com/dezhenxi/jev-auto-review.git
+cd jev-auto-review
+pnpm install
+pnpm run build
+
+# Auto review, from the harness checkout you already run
+dsh plugin --profile web add /path/to/deepseek-harness/packages/experimental/auto-review
+dsh plugin --profile web add /path/to/jev-auto-review
+```
+
+On Windows, pass absolute paths instead, for example `dsh plugin --profile web add "E:\DeepSeek\jev-auto-review"`.
 
 Remove a layer with the same CLI:
 
