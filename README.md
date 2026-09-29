@@ -71,6 +71,16 @@ Remove a layer with the same CLI:
 dsh plugin --profile web remove @deepseek-ai/dsh-experimental-jev-auto-review
 ```
 
+## Supported DSH versions
+
+| DSH | State |
+| --- | --- |
+| **0.2.0-rc.2** | Supported. Every seam this plugin uses was checked against the running release: `llm/stream` is still the same waterfall with the same signature, `GenerateOptions` still carries the fields the request matcher reads, and `sessionTelemetry.emit` plus `SessionTelemetryRecord` are unchanged. The declared peer range covers it. |
+| **0.1.7-rc.1 / 0.1.7-rc.2** | Supported. The test suite — 85 cases at per-file 100% coverage — runs against this line, and it drives `@deepseek-ai/dsh-experimental-auto-review` for real rather than stubbing it. |
+| Anything else | Unverified. A peer mismatch blocks installation; `dsh plugin allow-version <spec> --accept-risk` overrides that check, and the risk is yours. |
+
+The range tracks three seams rather than the whole harness: the `llm/stream` waterfall the cascade answers on, the optional `sessionTelemetry` service it counts verdicts into, and the review request `@deepseek-ai/dsh-experimental-auto-review` renders. A release that changes the reviewer's request text is the one that needs a matching plugin update.
+
 ## Configure
 
 The cascade ships **inert**: its own patch row carries an empty `allowTools`, so installing the layer answers no call until a deployment names the tools it trusts. Override the row by id in the profile's `cordis.patch.yml` (`~/.dsh/profiles/web/cordis.patch.yml` for the Web profile):
