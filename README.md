@@ -75,8 +75,8 @@ dsh plugin --profile web remove @deepseek-ai/dsh-experimental-jev-auto-review
 
 | DSH | State |
 | --- | --- |
-| **0.2.0-rc.2** | Supported. Every seam this plugin uses was checked against the running release: `llm/stream` is still the same waterfall with the same signature, `GenerateOptions` still carries the fields the request matcher reads, and `sessionTelemetry.emit` plus `SessionTelemetryRecord` are unchanged. The declared peer range covers it. |
-| **0.1.7-rc.1 / 0.1.7-rc.2** | Supported. The test suite — 85 cases at per-file 100% coverage — runs against this line, and it drives `@deepseek-ai/dsh-experimental-auto-review` for real rather than stubbing it. |
+| **0.2.0-rc.2** | Supported, and covered by this repository's own suite: the dev dependencies track this line, so all 85 cases run against `@deepseek-ai/dsh-experimental-auto-review@0.2.0-rc.2` — the real package, not a stub — at per-file 100% coverage. The live seams were checked as well: `llm/stream` is still the same waterfall with the same signature, `GenerateOptions` still carries every field the request matcher reads, and `sessionTelemetry.emit` plus `SessionTelemetryRecord` are unchanged. |
+| **0.1.7-rc.1 / 0.1.7-rc.2** | Supported. The same 85 cases passed against this line before the dev dependencies moved to 0.2.0, and the three seams below are identical in both. |
 | Anything else | Unverified. A peer mismatch blocks installation; `dsh plugin allow-version <spec> --accept-risk` overrides that check, and the risk is yours. |
 
 The range tracks three seams rather than the whole harness: the `llm/stream` waterfall the cascade answers on, the optional `sessionTelemetry` service it counts verdicts into, and the review request `@deepseek-ai/dsh-experimental-auto-review` renders. A release that changes the reviewer's request text is the one that needs a matching plugin update.

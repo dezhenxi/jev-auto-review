@@ -77,8 +77,8 @@ dsh plugin --profile web remove @deepseek-ai/dsh-experimental-jev-auto-review
 
 | DSH | 状态 |
 | --- | --- |
-| **0.2.0-rc.2** | 已支持。本插件用到的每个接缝都对着运行中的这个版本核过：`llm/stream` 仍是同一个 waterfall、签名未变，`GenerateOptions` 仍带请求匹配器读取的那些字段，`sessionTelemetry.emit` 与 `SessionTelemetryRecord` 结构未变。声明的 peer 范围已覆盖它。 |
-| **0.1.7-rc.1 / 0.1.7-rc.2** | 已支持。测试套件（85 个用例、逐文件 100% 覆盖）就是对着这条线跑的，而且是真正驱动 `@deepseek-ai/dsh-experimental-auto-review`，不是打桩。 |
+| **0.2.0-rc.2** | 已支持，且由本仓库自己的套件覆盖：开发依赖就跟在这条线上，因此 85 个用例全部对着 `@deepseek-ai/dsh-experimental-auto-review@0.2.0-rc.2` 真包运行（不是打桩），逐文件覆盖率 100%。运行时的接缝也核过：`llm/stream` 仍是同一个 waterfall、签名未变，`GenerateOptions` 仍带请求匹配器读取的每个字段，`sessionTelemetry.emit` 与 `SessionTelemetryRecord` 结构未变。 |
+| **0.1.7-rc.1 / 0.1.7-rc.2** | 已支持。开发依赖迁到 0.2.0 之前，同样这 85 个用例对着这条线全过，且下面那三个接缝在两代中完全一致。 |
 | 其他版本 | 未验证。peer 不匹配会直接拦住安装；`dsh plugin allow-version <spec> --accept-risk` 可以强行越过该检查，风险自负。 |
 
 这个范围盯的是三个接缝，而不是整个 harness：级联作答所依赖的 `llm/stream` waterfall、用于计数的可选 `sessionTelemetry` 服务，以及 `@deepseek-ai/dsh-experimental-auto-review` 渲染出的审查请求。**改动审查者请求文本的那个版本，才是需要同步更新本插件的版本。**
