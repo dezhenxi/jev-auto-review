@@ -38,6 +38,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepack": "tsc",
     "typecheck": "tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
