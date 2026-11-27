@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { createVolatile } from '@deepseek-ai/cosmokit'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import {
   API_KEY_ENV,
@@ -15,7 +16,7 @@ import {
 
 /** The least configuration a deployment must write. */
 function base(overrides: Partial<JevConfig> = {}): JevConfig {
-  return { allowTools: ['read'], minProbability: 0.98, ...overrides }
+  return { allowTools: ['read'], minProbability: 0.98, ...overrides } as JevConfig
 }
 
 describe('resolveConfig defaults', () => {
@@ -66,6 +67,11 @@ describe('resolveConfig defaults', () => {
 })
 
 describe('resolveConfig rejection', () => {
+  it('rejects a configuration that omits a required volatile field', () => {
+    expect(() => resolveConfig({ minProbability: 0.9 } as never)).toThrow(/allowTools is required/)
+    expect(() => resolveConfig({ allowTools: ['read'] } as never)).toThrow(/minProbability is required/)
+  })
+
   it('rejects a state section list that cannot describe the action', () => {
     expect(() => resolveConfig(base({ stateSections: [] }))).toThrow(/at least one section/)
     expect(() => resolveConfig(base({ stateSections: ['environment'] }))).toThrow(/pending-action/)
@@ -101,5 +107,22 @@ describe('Config schema', () => {
 
   it('rejects an unknown state section', () => {
     expect(() => Config({ allowTools: [], minProbability: 0.9, stateSections: ['everything'] } as never)).toThrow()
+  })
+
+  it('accepts volatile references and re-reads them on every resolve', () => {
+    const config = {
+      allowTools: createVolatile(['read']),
+      minProbability: createVolatile(0.98),
+    } as never as JevConfig
+    const first = resolveConfig(config)
+    expect(first.allowTools).toEqual(['read'])
+    expect(first.minProbability).toBe(0.98)
+
+    /* 模拟设置页热编辑：替换引用后再次 resolve 应观察到新值 */
+    config.allowTools = createVolatile(['read', 'glob'])
+    config.minProbability = createVolatile(0.9)
+    const second = resolveConfig(config)
+    expect(second.allowTools).toEqual(['read', 'glob'])
+    expect(second.minProbability).toBe(0.9)
   })
 })

@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-experimental-jev-auto-review",
   "description": "Jev-first cascade judge for the DeepSeek Harness Auto permission preset: a TypeSafe System One model answers the routine reviewed calls and the language-model reviewer keeps every uncertain one",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -10,6 +10,7 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./client": "./client/jev-auto-review.client.js",
     "./locale/*.json": "./locale/*.json",
     "./src/*": "./src/*",
     "./package.json": "./package.json",
@@ -18,6 +19,7 @@
   "files": [
     "lib/**/*.js",
     "lib/**/*.d.ts",
+    "client/*.js",
     "locale/*.json",
     "cordis.patch.yml",
     "README.md",
@@ -50,6 +52,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.0-rc.1 <5.0.0",
+    "@deepseek-ai/cosmokit": ">=1.8.5 <2",
     "@deepseek-ai/dsh-home-paths": ">=0.1.7-rc.2 <0.3.0",
     "@deepseek-ai/dsh-launch-environment": ">=0.1.7-rc.2 <0.3.0",
     "@deepseek-ai/dsh-llm": ">=0.1.7-rc.2 <0.3.0",
@@ -62,6 +65,7 @@
     "@deepseek-ai/cordis": "~4.0.4",
     "@deepseek-ai/cordis-plugin-include": "~1.0.9",
     "@deepseek-ai/cordis-plugin-loader": "~1.0.5",
+    "@deepseek-ai/cosmokit": "^1.9.0",
     "@deepseek-ai/dsh-agent": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-agent-instructions": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-experimental-auto-review": "^0.2.0-rc.2",
@@ -90,6 +94,13 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes"
+      ]
     }
   }
 }

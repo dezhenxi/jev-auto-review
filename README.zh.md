@@ -79,6 +79,7 @@ dsh plugin --profile web remove @deepseek-ai/dsh-experimental-jev-auto-review
 | --- | --- |
 | **0.2.0-rc.2** | 已支持，且由本仓库自己的套件覆盖：开发依赖就跟在这条线上，因此 85 个用例全部对着 `@deepseek-ai/dsh-experimental-auto-review@0.2.0-rc.2` 真包运行（不是打桩），逐文件覆盖率 100%。运行时的接缝也核过：`llm/stream` 仍是同一个 waterfall、签名未变，`GenerateOptions` 仍带请求匹配器读取的每个字段，`sessionTelemetry.emit` 与 `SessionTelemetryRecord` 结构未变。 |
 | **0.1.7-rc.1 / 0.1.7-rc.2** | 已支持。开发依赖迁到 0.2.0 之前，同样这 85 个用例对着这条线全过，且下面那三个接缝在两代中完全一致。 |
+| **0.2.2-rc.x** | peer 范围（`<0.3.0`）允许安装，三个接缝未变，但本仓库套件仍 pin 在 `0.2.0-rc.2`，需对着新版本重跑套件后再标为已支持。 |
 | 其他版本 | 未验证。peer 不匹配会直接拦住安装；`dsh plugin allow-version <spec> --accept-risk` 可以强行越过该检查，风险自负。 |
 
 这个范围盯的是三个接缝，而不是整个 harness：级联作答所依赖的 `llm/stream` waterfall、用于计数的可选 `sessionTelemetry` 服务，以及 `@deepseek-ai/dsh-experimental-auto-review` 渲染出的审查请求。**改动审查者请求文本的那个版本，才是需要同步更新本插件的版本。**
@@ -86,7 +87,13 @@ dsh plugin --profile web remove @deepseek-ai/dsh-experimental-jev-auto-review
 <a id="configure"></a>
 ## 配置
 
-级联出厂即**惰性**：它自己的补丁行带一个空的 `allowTools`，因此在部署点名自己信任的工具之前，装上这一层不会代答任何调用。在 profile 的 `cordis.patch.yml`（Web profile 为 `~/.dsh/profiles/web/cordis.patch.yml`）中按 id 覆盖该行：
+级联开箱即带只读快速通路：安装层已预填 `read/glob/grep + 0.98`，装上即对常规项目内只读调用生效。
+
+### 设置入口
+
+侧栏 **插件 → 已安装 → 本插件 → 行 jev-auto-review → 配置** 打开配置页。九个可调字段（`apiKey`、`baseURL`、`model`、`allowTools`、`minProbability`、`timeoutMs`、`cache`、`cacheMaxEntries`、`stateSections`）声明为 volatile，在配置页修改后即时生效，无需重启；`stats` 与 `statsPath` 是普通字段，修改后需要重启插件重建 verdict 文档。`apiKey` 在表单中脱敏显示，留空即回落到启动环境变量 `TYPESAFE_API_KEY`。
+
+要在 profile 的 `cordis.patch.yml`（Web profile 为 `~/.dsh/profiles/web/cordis.patch.yml`）中按 id 收紧或放宽时，覆盖该行：
 
 ```yaml
 - id: jev-auto-review
@@ -114,6 +121,14 @@ dsh plugin --profile web remove @deepseek-ai/dsh-experimental-jev-auto-review
 | `stateSections` | `["environment","pending-action"]` | 作为 state 转发出去的审查请求段。 |
 
 `minProbability` 卡的是模型自己"这是常规读取"的概率，不是正确率承诺。请用你自己的流量标定；从这个 README 抄来的值只是猜测。
+
+<a id="how-to-confirm"></a>
+## 如何确认插件在起作用
+
+- 日志：在 DSH 日志中搜索 `jev-auto-review`。首次快速通路命中会打印 `info`，之后每累计 20 次打印一次汇总；每次命中与升级都有 `debug`（含工具名、概率、是否命中缓存）。
+- 本地统计：默认写入 `<dsh home>/jev-auto-review/stats.json`（`stats`/`statsPath` 可改），含 `answered/escalated/unavailable` 总数、分工具计数与最近一条 verdict。
+- 会话遥测：每条 verdict 同时发一条 `channel: ops`、`telemetry.op: jev-auto-review/verdict` 记录，属性含 `tool/verdict/probability/cached/latency_ms/model/session.cwd` 与累计总数；上报失败只记 `debug`，不影响审查结论。
+- 识别失败自诊：系统提示词以 `REVIEW_POLICY` 开头但未通过严格识别时，会记一条 `debug`（含 `temperature/messages/tools` 数量），并直接升级给审查者，不会误代答。
 
 <a id="how-it-works"></a>
 ## 工作原理
@@ -153,7 +168,7 @@ dsh plugin --profile web remove @deepseek-ai/dsh-experimental-jev-auto-review
 ```sh
 pnpm install
 pnpm run typecheck     # tsc --noEmit
-pnpm test              # 72 个测试
+pnpm test              # 85 个测试
 pnpm run test:coverage # src/ 逐文件 100%
 pnpm run build         # lib/（ESM + 声明文件）
 ```
@@ -195,7 +210,7 @@ System One 模型收到一个 `noul` 问题，以及作为 state 的、部署选
 ## 已知限制
 
 - 没有 Auto review，本级联就是惰性的：它代答的是审查者的模型调用，而 Auto 预设只在该包被组合、且某个会话选中它时才存在。
-- 装上的这一层出厂即惰性：补丁行的 `allowTools` 为空，因此必须先按 id 覆盖该行，才会有调用走快速通路。
+- 装上的这一层默认只对 `read/glob/grep` 走快速通路；把 `allowTools` 置空即回到全量审查，按 id 覆盖该行即可调整。
 - 只有 `low + allow` 这一条路径可达。拒绝、medium 授权以及所有拿不准的情况都留给语言模型审查者，因此本插件不会减少会话看到的拒绝次数。
 - 对审查者请求文本的依赖是本包无法用类型表达的耦合：识别读的是审查者渲染的段标题与策略标记。审查者一旦改动渲染方式，所有调用会回到审查者手里——级联测试通过驱动已发布的包来发现这一点。
 - `allowTools` 与 `minProbability` 属于你的判断。一个并非真正只读的工具，或者一个定得过低的阈值，都会放行审查者本会质疑的操作。

@@ -3,6 +3,7 @@
  *
  * @module @deepseek-ai/dsh-experimental-jev-auto-review/config
  */
+import type { Volatile } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 import type { ResolvedConfig, StateSectionName } from './types.ts';
 /** Environment variable read when the config carries no API key. */
@@ -36,50 +37,73 @@ export declare const STATE_SECTION_NAMES: readonly StateSectionName[];
 export declare const DEFAULT_STATS = true;
 /** File name of the verdict document inside its directory. */
 export declare const STATS_FILENAME = "stats.json";
+/**
+ * One Config field that may arrive as a live volatile reference. The Loader
+ * resolves `.volatile()` schema fields into references; direct calls (tests,
+ * the composition suite) pass plain values. Every payload shape is accepted
+ * everywhere: a reference may also read `undefined` while an optional field
+ * is unset, and `Volatile<T>` is assignable to `Volatile<T | undefined>`.
+ */
+export type Live<T> = T | Volatile<T | undefined>;
 /** Plugin configuration as written in a profile's `cordis.yml`. */
 export interface Config {
-    /** TypeSafe API key; falls back to `$TYPESAFE_API_KEY`. Absent or empty leaves the plugin inert. */
-    apiKey?: string;
-    /** Endpoint base; `/v1/systemone` is appended. Defaults to the public API. */
-    baseURL?: string;
-    /** System One model id. Defaults to `jev-latest`. */
-    model?: string;
+    /** TypeSafe API key; falls back to `$TYPESAFE_API_KEY`. Absent or empty leaves the plugin inert. Hot-editable. */
+    apiKey?: Live<string>;
+    /** Endpoint base; `/v1/systemone` is appended. Defaults to the public API. Hot-editable. */
+    baseURL?: Live<string>;
+    /** System One model id. Defaults to `jev-latest`. Hot-editable. */
+    model?: Live<string>;
     /**
      * Tool names whose routine calls this plugin may answer on its own. Required:
      * the deployment names the narrow set it trusts, and an empty list keeps every
-     * call with the language-model reviewer.
+     * call with the language-model reviewer. Hot-editable.
      */
-    allowTools: string[];
+    allowTools: Live<string[]>;
     /**
      * Probability at or above which the model's `noul` yes short-circuits the
      * reviewer. Required: no default threshold is defensible without the
-     * deployment's own trace data.
+     * deployment's own trace data. Hot-editable.
      */
-    minProbability: number;
-    /** End-to-end budget for one System One call, in milliseconds. Defaults to 800. */
-    timeoutMs?: number;
-    /** Reuse a verdict for an identical pending action. Defaults to false. */
-    cache?: boolean;
-    /** Upper bound on remembered verdicts. Defaults to 512. */
-    cacheMaxEntries?: number;
-    /** Sections forwarded as state. Defaults to the environment and the pending action. */
-    stateSections?: StateSectionName[];
-    /** Write the local verdict document. Defaults to true. */
+    minProbability: Live<number>;
+    /** End-to-end budget for one System One call, in milliseconds. Defaults to 800. Hot-editable. */
+    timeoutMs?: Live<number>;
+    /** Reuse a verdict for an identical pending action. Defaults to false. Hot-editable. */
+    cache?: Live<boolean>;
+    /** Upper bound on remembered verdicts. Defaults to 512. Hot-editable. */
+    cacheMaxEntries?: Live<number>;
+    /** Sections forwarded as state. Defaults to the environment and the pending action. Hot-editable. */
+    stateSections?: Live<StateSectionName[]>;
+    /** Write the local verdict document. Defaults to true. Changing it remounts the plugin. */
     stats?: boolean;
-    /** Verdict document path. Defaults to `<dsh home>/jev-auto-review/stats.json`. */
+    /** Verdict document path. Defaults to `<dsh home>/jev-auto-review/stats.json`. Changing it remounts the plugin. */
     statsPath?: string;
 }
-/** Schemastery schema for {@link Config}. */
-export declare const Config: z<Config>;
 /**
- * Validate one configuration and fill its unset defaults.
- * @param config - raw plugin configuration.
+ * Schemastery schema for {@link Config}. The nine tunable fields are declared
+ * `.volatile()`, which is what projects them into the Settings form (the
+ * projection only surfaces volatile fields) and lets the plugin read them live
+ * per request. `stats` and `statsPath` own the verdict document built in
+ * `apply`, so they stay ordinary and remount the plugin on change.
+ *
+ * The declared type is `Schema<any, Config>`: the raw profile input is
+ * unconstrained (validation happens at runtime), while the resolved output is
+ * the {@link Config} contract. A two-sided `Schema<Config>` cannot hold — its
+ * contravariant input positions demand plain values, and its covariant output
+ * positions demand live references.
+ */
+export declare const Config: z<any, Config>;
+/**
+ * Validate one configuration and fill its unset defaults. Volatile references
+ * are materialized at the moment of the call, so re-running this function
+ * observes live edits; the caller re-runs it per request for hot fields.
+ * @param config - raw plugin configuration; volatile references and plain
+ *   values are both accepted.
  * @param apiKeyFromEnvironment - credential resolved from the launch environment,
  *   used when the configuration names none.
  * @returns a detached deeply immutable configuration.
- * @throws when the base URL is not an absolute HTTP(S) URL, a budget is not a
- *   positive integer, the threshold is not a finite unit-interval number, or no
- *   state section remains.
+ * @throws when a required field is absent, the base URL is not an absolute
+ *   HTTP(S) URL, a budget is not a positive integer, the threshold is not a
+ *   finite unit-interval number, or no valid state section remains.
  */
 export declare function resolveConfig(config: Config, apiKeyFromEnvironment?: string): ResolvedConfig;
 //# sourceMappingURL=config.d.ts.map

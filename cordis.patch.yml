@@ -1,10 +1,13 @@
-# The cascade ships inert: an empty allowlist answers no call, so installing the
-# layer changes no Session until a deployment names the tools it trusts. Override
-# this row by id in the profile's own cordis.patch.yml to set allowTools and
-# minProbability; every other field has a documented default.
+# The cascade ships with a read-only fast path: installing the layer answers only
+# routine project-local reads of the tools below. Override this row by id in the
+# profile's own cordis.patch.yml to narrow or widen allowTools and minProbability;
+# every other field has a documented default editable on the Settings page.
 - insert:
     - id: jev-auto-review
       name: '@deepseek-ai/dsh-experimental-jev-auto-review'
       config:
-        allowTools: []
-        minProbability: 0.99
+        allowTools:
+          - read
+          - glob
+          - grep
+        minProbability: 0.98

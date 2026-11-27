@@ -4,7 +4,13 @@ description: "Jev-first cascade for the DeepSeek Harness Auto permission preset:
 
 # jev-auto-review
 
-English | [中文](README.zh.md)
+[中文导读](README.zh.md) | English
+
+> 面向中国用户的快速导读：本插件在 Auto review 审查者前面加一个便宜的 System One 裁判，
+> 常规的项目内只读调用（`read`、`glob`、`grep`）由 TypeSafe 模型直接放行，不再消耗一次大模型审查请求；
+> 拿不准的调用原样交给语言模型审查者。开箱即带 `read/glob/grep + 0.98` 的只读快速通路，
+> `URL`、`Key`、`模型`等全部可在设置页编辑（中文说明已补齐），效果可在本地 `stats.json`、
+> 会话遥测 `ops` 记录和日志关键字 `jev-auto-review` 中查看。完整中文文档见 [README.zh.md](README.zh.md)。
 
 `@deepseek-ai/dsh-experimental-jev-auto-review` puts a cheap judge in front of the [Auto review](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/experimental/auto-review) reviewer that ships with the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It recognizes the reviewer's model call on the `llm/stream` waterfall and answers it from a [TypeSafe](https://typesafe.ai) System One model when the pending action is an ordinary project-local read of a tool the deployment approves. Every other call — an unapproved tool, a low probability, a missing credential, a service failure, a cancellation — delegates to the reviewer unchanged. It never denies and never answers medium or high risk, so the reviewer keeps its policy, its input, and its fail-closed behavior.
 
@@ -77,6 +83,7 @@ dsh plugin --profile web remove @deepseek-ai/dsh-experimental-jev-auto-review
 | --- | --- |
 | **0.2.0-rc.2** | Supported, and covered by this repository's own suite: the dev dependencies track this line, so all 85 cases run against `@deepseek-ai/dsh-experimental-auto-review@0.2.0-rc.2` — the real package, not a stub — at per-file 100% coverage. The live seams were checked as well: `llm/stream` is still the same waterfall with the same signature, `GenerateOptions` still carries every field the request matcher reads, and `sessionTelemetry.emit` plus `SessionTelemetryRecord` are unchanged. |
 | **0.1.7-rc.1 / 0.1.7-rc.2** | Supported. The same 85 cases passed against this line before the dev dependencies moved to 0.2.0, and the three seams below are identical in both. |
+| **0.2.2-rc.x** | Peer range (`<0.3.0`) allows installation, and the three seams are unchanged, but this repository's suite still pins `0.2.0-rc.2`; re-run the suite against the new line before marking it supported. |
 | Anything else | Unverified. A peer mismatch blocks installation; `dsh plugin allow-version <spec> --accept-risk` overrides that check, and the risk is yours. |
 
 The range tracks three seams rather than the whole harness: the `llm/stream` waterfall the cascade answers on, the optional `sessionTelemetry` service it counts verdicts into, and the review request `@deepseek-ai/dsh-experimental-auto-review` renders. A release that changes the reviewer's request text is the one that needs a matching plugin update.
@@ -96,6 +103,12 @@ The cascade ships **inert**: its own patch row carries an empty `allowTools`, so
     minProbability: 0.98
 ```
 
+`allowTools` 与 `minProbability` 仍为必填，但安装层已预填上面的只读默认值，开箱即有快速通路。
+
+### Settings entry
+
+侧栏 **插件 → 已安装 → 本插件 → 行 jev-auto-review → 配置** 打开配置页。九个可调字段（`apiKey`、`baseURL`、`model`、`allowTools`、`minProbability`、`timeoutMs`、`cache`、`cacheMaxEntries`、`stateSections`）声明为 volatile，在配置页修改后即时生效，无需重启；`stats` 与 `statsPath` 是普通字段，修改后需要重启插件重建 verdict 文档。`apiKey` 在表单中脱敏显示，留空即回落到启动环境变量 `TYPESAFE_API_KEY`。联通性验证见下文"如何确认插件在起作用"。
+
 Both configured values are required, because neither a trusted tool list nor a threshold is defensible without your own trace data. Every other field has a documented default:
 
 | Field | Default | Meaning |
@@ -111,6 +124,13 @@ Both configured values are required, because neither a trusted tool list nor a t
 | `stateSections` | `["environment","pending-action"]` | Sections of the reviewer's request forwarded as state. |
 
 `minProbability` is a threshold on the model's own probability that the action is a routine read, not a promise of correctness. Calibrate it against your own traffic; a value copied from this README is a guess.
+
+## How to confirm the plugin is working
+
+- 日志：在 DSH 日志中搜索 `jev-auto-review`。首次快速通路命中会打印 `info`，之后每累计 20 次打印一次汇总；每次命中与升级都有 `debug`（含工具名、概率、是否命中缓存）。
+- 本地统计：默认写入 `<dsh home>/jev-auto-review/stats.json`（`stats`/`statsPath` 可改），含 `answered/escalated/unavailable` 总数、分工具计数与最近一条 verdict。
+- 会话遥测：每条 verdict 同时发一条 `channel: ops`、`telemetry.op: jev-auto-review/verdict` 记录，属性含 `tool/verdict/probability/cached/latency_ms/model/session.cwd` 与累计总数；上报失败只记 `debug`，不影响审查结论。
+- 识别失败自诊：系统提示词以 `REVIEW_POLICY` 开头但未通过严格识别时，会记一条 `debug`（含 `temperature/messages/tools` 数量），并直接升级给审查者，不会误代答。
 
 ## How it works
 
@@ -148,7 +168,7 @@ The TypeSafe request carries one `noul` question and, as its state, only the sec
 ```sh
 pnpm install
 pnpm run typecheck     # tsc --noEmit
-pnpm test              # 72 tests
+pnpm test              # 85 tests
 pnpm run test:coverage # per-file 100% on src/
 pnpm run build         # lib/ (ESM + declarations)
 ```
@@ -188,7 +208,7 @@ Identical to the reviewer running alone, because the request is byte-for-byte th
 ## Known Limitations
 
 - The cascade is inert without Auto review: it answers the reviewer's model call, and the Auto preset only exists while that package is composed and a session selects it.
-- The installed layer ships inert: its patch row carries an empty `allowTools`, so you must override the row by id before any call takes the fast path.
+- The installed layer fast-paths only `read/glob/grep` by default; emptying `allowTools` returns every call to the reviewer. Override the row by id to adjust.
 - Only `low + allow` is reachable. Denials, medium-risk grants, and every uncertain case stay with the language-model reviewer, so this plugin cannot reduce the number of denials a session sees.
 - The dependency on the reviewer's request text is a coupling this package cannot type: recognition reads the section headings and policy markers the reviewer renders. A reviewer rendering change returns every call to the reviewer, which the cascade suite detects by driving the published package.
 - `allowTools` and `minProbability` are your judgment. A tool that is not genuinely read-only, or a threshold set low, authorizes work the reviewer would have questioned.

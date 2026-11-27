@@ -55,7 +55,7 @@ describe('buildJudgeInput', () => {
     }, ['environment', 'pending-action'])
     expect(input?.state).toEqual({
       [ACTION_STATE_KEY]: ACTION,
-      [CWD_STATE_KEY]: { [CWD_STATE_KEY]: 'E:\\project' },
+      [CWD_STATE_KEY]: 'E:\\project',
     })
     expect(input?.question.type).toBe('noul')
     expect(input?.question.instructions).toContain(`\`${CWD_STATE_KEY}\``)

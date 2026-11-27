@@ -21,9 +21,9 @@ import type {} from '@deepseek-ai/dsh-session-telemetry'
 import { API_KEY_ENV, resolveConfig, type Config } from './config.ts'
 import { allowChunks, buildJudgeInput, mayFastPath, VerdictCache, verdictCacheKey } from './decision.ts'
 import { JevClient } from './jev-client.ts'
-import { pendingActionName, reviewRequestOf } from './review-request.ts'
+import { pendingActionName, REVIEW_POLICY_PREFIX, reviewRequestOf } from './review-request.ts'
 import { JevStats, type VerdictEntry } from './stats.ts'
-import type { ReviewRequest, NoulQuestion } from './types.ts'
+import type { ResolvedConfig, ReviewRequest, NoulQuestion } from './types.ts'
 
 export { Config } from './config.ts'
 export type { StateSectionName } from './types.ts'
@@ -47,28 +47,65 @@ export const inject = ['llm']
  * @param config - raw plugin configuration from the profile.
  */
 export function apply(ctx: Context, config: Config): void {
-  const resolved = resolveConfig(config, launchEnvironmentOf(ctx).get(API_KEY_ENV)?.value)
-  const client = new JevClient({
-    baseURL: resolved.baseURL,
-    apiKey: resolved.apiKey,
-    model: resolved.model,
-    timeoutMs: resolved.timeoutMs,
-  })
-  if (!client.available()) {
+  const apiKeyFromEnvironment = launchEnvironmentOf(ctx).get(API_KEY_ENV)?.value
+  /* Mount-time resolution owns the stats document: `stats` and `statsPath` are
+     ordinary fields, and changing them remounts the plugin. */
+  const mounted = resolveConfig(config, apiKeyFromEnvironment)
+  if (!mounted.apiKey) {
     ctx.logger.warn(
       `jev-auto-review: no TypeSafe API key (config apiKey or $${API_KEY_ENV}); `
-      + 'every reviewed call stays with the language-model reviewer',
+      + 'every reviewed call stays with the language-model reviewer until one is configured '
+      + 'on the plugin\'s settings page or in the environment',
     )
   }
 
   const lifecycle = new AbortController()
-  const cache = resolved.cache ? new VerdictCache(resolved.cacheMaxEntries) : undefined
   const active = new Set<Promise<unknown>>()
   let answered = 0
 
-  const stats = resolved.stats
+  /* The tunable fields are volatile and read live per request; a connection-shape
+     change rebuilds the client, and a cache-shape change rebuilds the cache. */
+  let client = new JevClient({
+    baseURL: mounted.baseURL,
+    apiKey: mounted.apiKey,
+    model: mounted.model,
+    timeoutMs: mounted.timeoutMs,
+  })
+  let connection = connectionKeyOf(mounted)
+  let cache: VerdictCache | undefined
+  let cacheBound: number | undefined
+
+  /** One stable identity of the client-shaping fields. */
+  function connectionKeyOf(resolved: ResolvedConfig): string {
+    return JSON.stringify([resolved.baseURL, resolved.apiKey, resolved.model, resolved.timeoutMs])
+  }
+
+  /** Rebuild the client when the live connection fields changed since the last request. */
+  function ensureClient(resolved: ResolvedConfig): void {
+    const key = connectionKeyOf(resolved)
+    if (key === connection) return
+    connection = key
+    client = new JevClient({
+      baseURL: resolved.baseURL,
+      apiKey: resolved.apiKey,
+      model: resolved.model,
+      timeoutMs: resolved.timeoutMs,
+    })
+  }
+
+  /** The request's verdict cache; `undefined` while caching is off. */
+  function cacheFor(resolved: ResolvedConfig): VerdictCache | undefined {
+    if (!resolved.cache) return undefined
+    if (cache === undefined || cacheBound !== resolved.cacheMaxEntries) {
+      cache = new VerdictCache(resolved.cacheMaxEntries)
+      cacheBound = resolved.cacheMaxEntries
+    }
+    return cache
+  }
+
+  const stats = mounted.stats
     ? new JevStats({
-      file: resolved.statsPath,
+      file: mounted.statsPath,
       onError: (error) => {
         ctx.logger.debug(`jev-auto-review: verdict document not written (${String(error)})`)
       },
@@ -76,11 +113,37 @@ export function apply(ctx: Context, config: Config): void {
     : undefined
 
   /**
+   * Read the live volatile configuration. Validation failure fails closed:
+   * the caller escalates to the reviewer instead of answering.
+   */
+  const readLive = (): ResolvedConfig | undefined => {
+    try {
+      return resolveConfig(config, apiKeyFromEnvironment)
+    } catch (error: unknown) {
+      ctx.logger.debug(`jev-auto-review: live configuration rejected (${String(error)}); escalated`)
+      return undefined
+    }
+  }
+
+  /**
    * Count one verdict and hand it to the telemetry backend. Both are
    * best-effort: a diagnostic must never change what the reviewer decides.
    */
-  const countVerdict = (entry: VerdictEntry): void => {
+  const countVerdict = (entry: VerdictEntry, extra: { readonly cwd?: string; readonly model?: string } = {}): void => {
     stats?.record(entry)
+    const snapshot = stats?.snapshot()
+    const totals = snapshot?.totals
+    if (entry.verdict === 'answered') {
+      const answeredTotal = totals?.answered ?? 0
+      if (answeredTotal === 1 || answeredTotal % 20 === 0) {
+        ctx.logger.info(
+          `jev-auto-review: fast path answered ${answeredTotal} routine call(s) without the language-model reviewer `
+          + `(latest: ${entry.tool}, p=${entry.probability?.toFixed(4) ?? 'n/a'}). `
+          + `Totals: answered=${totals?.answered ?? 0}, escalated=${totals?.escalated ?? 0}, unavailable=${totals?.unavailable ?? 0}. `
+          + `Detail: ${mounted.stats ? mounted.statsPath : 'stats off'}.`,
+        )
+      }
+    }
     const backend = ctx.get('sessionTelemetry')
     if (backend === undefined) return
     try {
@@ -94,11 +157,13 @@ export function apply(ctx: Context, config: Config): void {
           'verdict': entry.verdict,
           'cached': entry.cached ? 1 : 0,
           'latency_ms': entry.latencyMs,
+          'model': extra.model ?? mounted.model,
+          ...extra.cwd === undefined ? {} : { 'session.cwd': extra.cwd },
           ...entry.probability === undefined ? {} : { 'probability': entry.probability },
-          ...Object.fromEntries(Object.entries(stats?.snapshot().totals ?? {})
+          ...Object.fromEntries(Object.entries(totals ?? {})
             .map(([kind, count]) => [`total.${kind}`, count])),
         },
-        body: stats?.snapshot(),
+        body: snapshot,
       })
     } catch (error: unknown) {
       // A reporting backend must not reach the review path.
@@ -117,37 +182,49 @@ export function apply(ctx: Context, config: Config): void {
 
   /**
    * Try to answer one review request without the language model.
+   * @param request - the recognized review request.
+   * @param actionName - the pending action's tool name.
+   * @param live - the volatile configuration read for this request.
    * @returns whether the fast path applies; any failure is `false`.
    */
-  const attemptFastPath = async (request: ReviewRequest, actionName: string): Promise<boolean> => {
+  const attemptFastPath = async (request: ReviewRequest, actionName: string, live: ResolvedConfig): Promise<boolean> => {
     const startedAt = Date.now()
     try {
-      const input = buildJudgeInput(request.sections, resolved.stateSections)
+      ensureClient(live)
+      const input = buildJudgeInput(request.sections, live.stateSections)
       /* v8 ignore next 2 -- the shipped reviewer renders every section on every request; this abstains only if one stops being rendered. */
       if (input === undefined) return false
-      const key = cache === undefined ? undefined : verdictCacheKey(input.state)
-      let probability = key === undefined ? undefined : cache?.get(key)
+      const verdicts = cacheFor(live)
+      const key = verdicts === undefined ? undefined : verdictCacheKey(input.state)
+      let probability = key === undefined ? undefined : verdicts?.get(key)
       let cached = probability !== undefined
       if (probability === undefined) {
         const signal = request.signal === undefined
           ? lifecycle.signal
           : AbortSignal.any([request.signal, lifecycle.signal])
         probability = await judgeTracked(input.state, input.question, signal)
-        if (probability !== undefined && key !== undefined) cache?.set(key, probability)
+        if (probability !== undefined && key !== undefined) verdicts?.set(key, probability)
         cached = false
       }
       const allowed = probability !== undefined
-        && mayFastPath(actionName, resolved.allowTools, probability, resolved.minProbability)
+        && mayFastPath(actionName, live.allowTools, probability, live.minProbability)
       ctx.logger.debug(
         `jev-auto-review: ${actionName} -> ${allowed ? 'answered' : 'escalated'} `
         + `(p=${probability === undefined ? 'unavailable' : probability.toFixed(4)}, cached=${String(cached)})`,
       )
+      const environment = request.sections['environment']
+      const cwd = typeof environment === 'object' && environment !== null && !Array.isArray(environment)
+        ? (environment as { readonly cwd?: unknown }).cwd
+        : undefined
       countVerdict({
         tool: actionName,
         verdict: probability === undefined ? 'unavailable' : allowed ? 'answered' : 'escalated',
         ...probability === undefined ? {} : { probability },
         cached,
         latencyMs: Date.now() - startedAt,
+      }, {
+        model: live.model,
+        ...typeof cwd === 'string' ? { cwd } : {},
       })
       return allowed
     /* v8 ignore start -- defensive: JevClient never throws by contract; this arm contains an unexpected fault only. */
@@ -163,11 +240,22 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(function* () {
     const stop = ctx.on('llm/stream', (options, next): AsyncIterable<StreamChunk> => {
       const request = reviewRequestOf(options)
-      if (request === undefined) return next()
+      if (request === undefined) {
+        if (typeof options.system === 'string' && options.system.startsWith(REVIEW_POLICY_PREFIX)) {
+          ctx.logger.debug(
+            'jev-auto-review: review-shaped request did not match the strict recognizer; '
+            + `escalated (temperature=${String(options.temperature)}, messages=${options.messages.length}, `
+            + `tools=${options.tools?.length ?? 0})`,
+          )
+        }
+        return next()
+      }
       const actionName = pendingActionName(request.sections)
-      if (actionName === undefined || !resolved.allowTools.includes(actionName)) return next()
+      const live = readLive()
+      if (live === undefined) return next()
+      if (actionName === undefined || !live.allowTools.includes(actionName)) return next()
       return (async function* cascade(): AsyncIterable<StreamChunk> {
-        if (!await attemptFastPath(request, actionName)) {
+        if (!await attemptFastPath(request, actionName, live)) {
           yield* next()
           return
         }
@@ -175,7 +263,7 @@ export function apply(ctx: Context, config: Config): void {
         if (answered === 1) {
           ctx.logger.info(
             `jev-auto-review: answering "${actionName}" without the language-model reviewer `
-            + `(p >= ${resolved.minProbability})`,
+            + `(p >= ${live.minProbability})`,
           )
         }
         yield* allowChunks()

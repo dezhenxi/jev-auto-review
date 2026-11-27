@@ -256,7 +256,7 @@ describe('jev-auto-review cascade over the shipped reviewer', () => {
     expect(body).toMatchObject({
       model: 'jev-latest',
       questions: { allow: { type: 'noul' } },
-      state: { cwd: { cwd: '/workspace/project' }, pending_action: { name: 'probe' } },
+      state: { cwd: '/workspace/project', pending_action: { name: 'probe' } },
     })
   })
 

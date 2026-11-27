@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Jev Auto Review",
-    "description": "Answer routine Auto review calls with the TypeSafe Jev model so the language-model reviewer only judges the uncertain ones."
+    "description": "Answers routine Auto review calls with the TypeSafe Jev model so the language-model reviewer only judges the uncertain ones. Open the row's Configure page in Plugins to edit the endpoint, key, model, threshold, and fast-path tool list; edits apply immediately."
   }
 }
